@@ -578,3 +578,15 @@ const ota_ymodem_file_info_t *ota_ymodem_protocol_get_file_info(void)
 {
   return &g_ymodem.file;
 }
+
+uint8_t ota_ymodem_protocol_is_busy(void)
+{
+  return (uint8_t)((g_ymodem.rx_state != OTA_YMODEM_RX_IDLE) &&
+                   (g_ymodem.rx_state != OTA_YMODEM_RX_DONE) &&
+                   (g_ymodem.rx_state != OTA_YMODEM_RX_ABORTED));
+}
+
+uint8_t ota_ymodem_protocol_is_done(void)
+{
+  return (uint8_t)(g_ymodem.rx_state == OTA_YMODEM_RX_DONE);
+}

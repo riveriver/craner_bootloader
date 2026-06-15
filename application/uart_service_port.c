@@ -51,7 +51,16 @@ uart_service_status_t uart_service_port_init(void)
 {
   const uint16_t count = (uint16_t)(sizeof(uart_service_table) / sizeof(uart_service_table[0]));
 
-  return uart_service_init(uart_service_table, count);
+  uart_service_status_t ret =uart_service_init(uart_service_table, count);
+  if(ret != UART_SERVICE_OK)
+  {
+    LOG_E("uart service init failed: %d", (int)ret);
+    return UART_SERVICE_ERR;
+  }
+  
+  (void)uart_service_start_rx_it_by_name("shell");
+  (void)uart_service_start_rx_it_by_name("ota");
+  return UART_SERVICE_OK;
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
