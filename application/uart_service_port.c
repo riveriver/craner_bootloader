@@ -100,10 +100,22 @@ static uart_service_status_t mqtt_interface_on_rx(uart_service_t *uart,
   {
     return UART_SERVICE_ERR_PARAM;
   }
-
-  for (uint16_t i = 0U; i < len; ++i)
+  
+  if (len < 2U)
   {
-    (void)ota_ymodem_protocol_input_byte(data[i]);
+    return UART_SERVICE_ERR_RX;
+  }
+
+  if(data[0] == '1' && data[1] == ',')
+  {
+    shell_interface_printf("mqtt rx: %.*s", len - 2U, &data[2]);
+  }
+  else if(data[0] == '2' && data[1] == ',')
+  {
+    for (uint16_t i = 2U; i < len; ++i)
+    {
+      (void)ota_ymodem_protocol_input_byte(data[i]);
+    }
   }
 
   return UART_SERVICE_OK;

@@ -11,6 +11,7 @@ extern "C" {
 
 uart_service_status_t uart_service_port_init(void);
 uart_service_status_t shell_interface_printf(const char *format, ...);
+uart_service_status_t mqtt_interface_printf(const char *format, ...);
 
 #ifdef __cplusplus
 }
