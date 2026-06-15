@@ -46,6 +46,37 @@ uart_service_status_t shell_interface_printf(const char *format, ...)
   return uart_service_send_by_name(SHELL_INTERFACE_NAME, (const uint8_t *)buffer, (uint16_t)len);
 }
 
+uart_service_status_t mqtt_interface_printf(const char *format, ...)
+{
+  char buffer[SHELL_INTERFACE_TX_BUFFER_SIZE];
+  va_list args;
+  int len;
+
+  if (format == NULL)
+  {
+    return UART_SERVICE_ERR_PARAM;
+  }
+
+  buffer[0] = '1';
+  buffer[1] = ',';
+
+  va_start(args, format);
+  len = vsnprintf(&buffer[2], sizeof(buffer) - 2U, format, args);
+  va_end(args);
+
+  if (len <= 0)
+  {
+    return UART_SERVICE_ERR_PARAM;
+  }
+
+  if ((uint32_t)len >= (sizeof(buffer) - 2U))
+  {
+    len = (int)sizeof(buffer) - 3;
+  }
+
+  return uart_service_send_by_name(MQTT_INTERFACE_NAME, (const uint8_t *)buffer, (uint16_t)(len + 2));
+}
+
 static uart_service_status_t shell_interface_on_rx(uart_service_t *uart,
                                                    const uint8_t *data,
                                                    uint16_t len)
