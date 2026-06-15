@@ -16,6 +16,35 @@ extern UART_HandleTypeDef huart8;
 
 #define SHELL_INTERFACE_NAME "shell"
 #define OTA_INTERFACE_NAME "ota"
+#define SHELL_INTERFACE_TX_BUFFER_SIZE 256U
+
+uart_service_status_t shell_interface_printf(const char *format, ...)
+{
+  char buffer[SHELL_INTERFACE_TX_BUFFER_SIZE];
+  va_list args;
+  int len;
+
+  if (format == NULL)
+  {
+    return UART_SERVICE_ERR_PARAM;
+  }
+
+  va_start(args, format);
+  len = vsnprintf(buffer, sizeof(buffer), format, args);
+  va_end(args);
+
+  if (len <= 0)
+  {
+    return UART_SERVICE_ERR_PARAM;
+  }
+
+  if ((uint32_t)len >= sizeof(buffer))
+  {
+    len = (int)sizeof(buffer) - 1;
+  }
+
+  return uart_service_send_by_name(SHELL_INTERFACE_NAME, (const uint8_t *)buffer, (uint16_t)len);
+}
 
 static uart_service_status_t shell_interface_on_rx(uart_service_t *uart,
                                                    const uint8_t *data,
