@@ -15,7 +15,7 @@ extern UART_HandleTypeDef huart1;
 extern UART_HandleTypeDef huart8;
 
 #define SHELL_INTERFACE_NAME "shell"
-#define OTA_INTERFACE_NAME "ota"
+#define MQTT_INTERFACE_NAME "mqtt"
 #define SHELL_INTERFACE_TX_BUFFER_SIZE 256U
 
 uart_service_status_t shell_interface_printf(const char *format, ...)
@@ -60,7 +60,7 @@ static uart_service_status_t shell_interface_on_rx(uart_service_t *uart,
   return uart_service_send_by_name(SHELL_INTERFACE_NAME, data, len);
 }
 
-static uart_service_status_t ota_interface_on_rx(uart_service_t *uart,
+static uart_service_status_t mqtt_interface_on_rx(uart_service_t *uart,
                                                  const uint8_t *data,
                                                  uint16_t len)
 {
@@ -87,9 +87,9 @@ static const uart_service_config_t uart_service_table[] = {
     .rx_timeout_ms = 0U,
   },
   {
-    .name = OTA_INTERFACE_NAME,
+    .name = MQTT_INTERFACE_NAME,
     .huart = &huart1,
-    .rx_callback = ota_interface_on_rx,
+    .rx_callback = mqtt_interface_on_rx,
     .tx_timeout_ms = 100U,
     .rx_timeout_ms = 0U,
   },
