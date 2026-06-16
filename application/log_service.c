@@ -5,7 +5,7 @@
 
 #include "main.h"
 
-extern UART_HandleTypeDef huart1;
+extern UART_HandleTypeDef huart5;
 
 void log_printf(char *format, ...)
 {
@@ -16,5 +16,5 @@ void log_printf(char *format, ...)
   vsnprintf(str, sizeof(str), format, args);
   va_end(args);
 
-  HAL_UART_Transmit(&huart1, (uint8_t *)str, strlen(str), 100U);
+  HAL_UART_Transmit(&huart5, (uint8_t *)str, strlen(str), 100U);
 }

@@ -11,8 +11,8 @@
 
 #define LOG_E(format, ...) log_printf("[E] " format "\r\n", ##__VA_ARGS__)
 
+extern UART_HandleTypeDef huart5;
 extern UART_HandleTypeDef huart1;
-extern UART_HandleTypeDef huart8;
 
 #define SHELL_INTERFACE_NAME "shell"
 #define MQTT_INTERFACE_NAME "mqtt"
@@ -124,7 +124,7 @@ static uart_service_status_t mqtt_interface_on_rx(uart_service_t *uart,
 static const uart_service_config_t uart_service_table[] = {
   {
     .name = SHELL_INTERFACE_NAME,
-    .huart = &huart8,
+    .huart = &huart5,
     .rx_callback = shell_interface_on_rx,
     .tx_timeout_ms = 100U,
     .rx_timeout_ms = 0U,

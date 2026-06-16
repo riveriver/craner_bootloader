@@ -8,7 +8,7 @@
 #include "ota_ymodem_protocol.h"
 #include "uart_service.h"
 
-#define OTA_MANAGE_UART_NAME          "ota"
+#define OTA_MANAGE_UART_NAME          "mqtt"
 #define OTA_MANAGE_CRC_REQUEST_MS     5000UL
 #define OTA_MANAGE_PACKET_TIMEOUT_MS  1000UL
 
