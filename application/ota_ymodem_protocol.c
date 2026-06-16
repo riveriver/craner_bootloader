@@ -3,11 +3,16 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "log_service.h"
+
 #define YMODEM_SOH_DATA_SIZE 128U
 #define YMODEM_STX_DATA_SIZE 1024U
 #define YMODEM_DEFAULT_MAX_ERRORS 10U
 #define YMODEM_CAN_COUNT_TO_ABORT 2U
 #define YMODEM_DEFAULT_PACKET_TIMEOUT_MS 1000U
+
+#define YMODEM_LOG_I(format, ...) log_printf("[I][YMODEM] " format "\r\n", ##__VA_ARGS__)
+#define YMODEM_LOG_E(format, ...) log_printf("[E][YMODEM] " format "\r\n", ##__VA_ARGS__)
 
 typedef enum
 {
@@ -41,6 +46,60 @@ typedef struct
 
 static ota_ymodem_context_t g_ymodem;
 
+static const char *ymodem_status_name(ota_ymodem_status_t status)
+{
+  switch (status)
+  {
+    case OTA_YMODEM_STATUS_OK:
+      return "OK";
+    case OTA_YMODEM_STATUS_ERR_PARAM:
+      return "PARAM";
+    case OTA_YMODEM_STATUS_ERR_SEND:
+      return "SEND";
+    case OTA_YMODEM_STATUS_ERR_SEQUENCE:
+      return "SEQUENCE";
+    case OTA_YMODEM_STATUS_ERR_CRC:
+      return "CRC";
+    case OTA_YMODEM_STATUS_ERR_PACKET:
+      return "PACKET";
+    case OTA_YMODEM_STATUS_ERR_CALLBACK:
+      return "CALLBACK";
+    case OTA_YMODEM_STATUS_ERR_ABORTED:
+      return "ABORTED";
+    case OTA_YMODEM_STATUS_ERR_TIMEOUT:
+      return "TIMEOUT";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+static const char *ymodem_rx_state_name(ota_ymodem_rx_state_t state)
+{
+  switch (state)
+  {
+    case OTA_YMODEM_RX_IDLE:
+      return "IDLE";
+    case OTA_YMODEM_RX_FIND_HEADER:
+      return "FIND_HEADER";
+    case OTA_YMODEM_RX_READ_PACKET_SEQ:
+      return "READ_SEQ";
+    case OTA_YMODEM_RX_READ_PACKET_SEQ_INV:
+      return "READ_SEQ_INV";
+    case OTA_YMODEM_RX_RECV_FILE_INFO:
+      return "RECV_FILE_INFO";
+    case OTA_YMODEM_RX_RECV_FILE_DATA:
+      return "RECV_FILE_DATA";
+    case OTA_YMODEM_RX_RECV_FINISH_PACKET:
+      return "RECV_FINISH";
+    case OTA_YMODEM_RX_DONE:
+      return "DONE";
+    case OTA_YMODEM_RX_ABORTED:
+      return "ABORTED";
+    default:
+      return "UNKNOWN";
+  }
+}
+
 static uint8_t ymodem_max_errors(void)
 {
   return (g_ymodem.config.max_errors == 0U) ? YMODEM_DEFAULT_MAX_ERRORS
@@ -67,16 +126,21 @@ static ota_ymodem_status_t ymodem_send_bytes(const uint8_t *data, uint16_t len)
 {
   if ((data == NULL) || (len == 0U))
   {
+    YMODEM_LOG_E("send param invalid: data=%p len=%u",
+                 (void *)data,
+                 (unsigned int)len);
     return OTA_YMODEM_STATUS_ERR_PARAM;
   }
 
   if (g_ymodem.config.send == NULL)
   {
+    YMODEM_LOG_E("send callback missing");
     return OTA_YMODEM_STATUS_ERR_SEND;
   }
 
   if (g_ymodem.config.send(data, len, g_ymodem.config.user) != 0)
   {
+    YMODEM_LOG_E("send callback failed: len=%u", (unsigned int)len);
     return OTA_YMODEM_STATUS_ERR_SEND;
   }
 
@@ -91,6 +155,13 @@ static ota_ymodem_status_t ymodem_send_control(uint8_t control)
 static ota_ymodem_status_t ymodem_send_abort(ota_ymodem_status_t reason, uint8_t send_cancel)
 {
   static const uint8_t cancel[2] = {OTA_YMODEM_CAN, OTA_YMODEM_CAN};
+
+  YMODEM_LOG_E("abort: reason=%s(%d) send_cancel=%u state=%s errors=%u",
+               ymodem_status_name(reason),
+               (int)reason,
+               (unsigned int)send_cancel,
+               ymodem_rx_state_name(g_ymodem.rx_state),
+               (unsigned int)g_ymodem.error_count);
 
   if (send_cancel != 0U)
   {
@@ -140,6 +211,14 @@ static uint8_t ymodem_is_digit(uint8_t value)
 static ota_ymodem_status_t ymodem_reject_packet(ota_ymodem_status_t reason)
 {
   ++g_ymodem.error_count;
+  YMODEM_LOG_E("reject packet: reason=%s(%d) count=%u/%u state=%s seq=%u expect=%u",
+               ymodem_status_name(reason),
+               (int)reason,
+               (unsigned int)g_ymodem.error_count,
+               (unsigned int)ymodem_max_errors(),
+               ymodem_rx_state_name(g_ymodem.rx_state),
+               (unsigned int)g_ymodem.packet_seq,
+               (unsigned int)g_ymodem.expected_seq);
 
   if (g_ymodem.error_count >= ymodem_max_errors())
   {
@@ -171,6 +250,7 @@ static ota_ymodem_status_t ymodem_accept_file_info_packet(void)
 
   if (g_ymodem.packet_seq != 0U)
   {
+    YMODEM_LOG_E("file info seq invalid: seq=%u", (unsigned int)g_ymodem.packet_seq);
     return ymodem_reject_packet(OTA_YMODEM_STATUS_ERR_SEQUENCE);
   }
 
@@ -180,6 +260,7 @@ static ota_ymodem_status_t ymodem_accept_file_info_packet(void)
   {
     g_ymodem.phase = YMODEM_PHASE_DONE;
     g_ymodem.rx_state = OTA_YMODEM_RX_DONE;
+    YMODEM_LOG_I("empty file info packet, transfer done");
     return ymodem_send_control(OTA_YMODEM_ACK);
   }
 
@@ -190,6 +271,7 @@ static ota_ymodem_status_t ymodem_accept_file_info_packet(void)
 
   if (name_len >= g_ymodem.packet_size)
   {
+    YMODEM_LOG_E("file info invalid: missing name terminator");
     return ymodem_reject_packet(OTA_YMODEM_STATUS_ERR_PACKET);
   }
 
@@ -232,10 +314,16 @@ static ota_ymodem_status_t ymodem_accept_file_info_packet(void)
   g_ymodem.file.size_valid = size_valid;
   g_ymodem.file.bytes_received = 0U;
 
+  YMODEM_LOG_I("file info: name=%s size=%lu size_valid=%u",
+               g_ymodem.file.name,
+               (unsigned long)g_ymodem.file.size,
+               (unsigned int)g_ymodem.file.size_valid);
+
   if (g_ymodem.config.on_file_begin != NULL)
   {
     if (g_ymodem.config.on_file_begin(&g_ymodem.file, g_ymodem.config.user) != 0)
     {
+      YMODEM_LOG_E("file begin callback failed");
       return ymodem_send_abort(OTA_YMODEM_STATUS_ERR_CALLBACK, 1U);
     }
   }
@@ -258,6 +346,7 @@ static ota_ymodem_status_t ymodem_accept_data_packet(void)
 
   if (g_ymodem.packet_seq == previous_seq)
   {
+    YMODEM_LOG_I("duplicate packet ACK: seq=%u", (unsigned int)g_ymodem.packet_seq);
     g_ymodem.rx_state = OTA_YMODEM_RX_FIND_HEADER;
     g_ymodem.data_index = 0U;
 
@@ -271,6 +360,9 @@ static ota_ymodem_status_t ymodem_accept_data_packet(void)
 
   if (g_ymodem.packet_seq != g_ymodem.expected_seq)
   {
+    YMODEM_LOG_E("data seq invalid: seq=%u expect=%u",
+                 (unsigned int)g_ymodem.packet_seq,
+                 (unsigned int)g_ymodem.expected_seq);
     return ymodem_reject_packet(OTA_YMODEM_STATUS_ERR_SEQUENCE);
   }
 
@@ -302,6 +394,9 @@ static ota_ymodem_status_t ymodem_accept_data_packet(void)
                                      g_ymodem.file.bytes_received,
                                      g_ymodem.config.user) != 0)
     {
+      YMODEM_LOG_E("file data callback failed: offset=%lu len=%u",
+                   (unsigned long)g_ymodem.file.bytes_received,
+                   (unsigned int)payload_len);
       return ymodem_send_abort(OTA_YMODEM_STATUS_ERR_CALLBACK, 1U);
     }
   }
@@ -318,11 +413,13 @@ static ota_ymodem_status_t ymodem_accept_finish_packet(void)
 {
   if (g_ymodem.packet_seq != 0U)
   {
+    YMODEM_LOG_E("finish packet seq invalid: seq=%u", (unsigned int)g_ymodem.packet_seq);
     return ymodem_reject_packet(OTA_YMODEM_STATUS_ERR_SEQUENCE);
   }
 
   if (g_ymodem.data[0] != 0U)
   {
+    YMODEM_LOG_E("finish packet invalid: first_byte=0x%02x", (unsigned int)g_ymodem.data[0]);
     return ymodem_reject_packet(OTA_YMODEM_STATUS_ERR_PACKET);
   }
 
@@ -331,11 +428,13 @@ static ota_ymodem_status_t ymodem_accept_finish_packet(void)
 
   if (ymodem_send_control(OTA_YMODEM_ACK) != OTA_YMODEM_STATUS_OK)
   {
+    YMODEM_LOG_E("finish packet ACK send failed");
     return OTA_YMODEM_STATUS_ERR_SEND;
   }
 
   if (g_ymodem.config.on_file_end != NULL)
   {
+    YMODEM_LOG_I("finish packet accepted, call file end");
     g_ymodem.config.on_file_end(&g_ymodem.file, g_ymodem.config.user);
   }
 
@@ -348,6 +447,10 @@ static ota_ymodem_status_t ymodem_finish_packet(ota_ymodem_status_t (*accept_pac
 
   if (calc_crc != g_ymodem.received_crc)
   {
+    YMODEM_LOG_E("CRC mismatch: seq=%u calc=0x%04x recv=0x%04x",
+                 (unsigned int)g_ymodem.packet_seq,
+                 (unsigned int)calc_crc,
+                 (unsigned int)g_ymodem.received_crc);
     return ymodem_reject_packet(OTA_YMODEM_STATUS_ERR_CRC);
   }
 
@@ -389,12 +492,14 @@ static ota_ymodem_status_t ymodem_handle_eot(void)
 
   if (g_ymodem.phase != YMODEM_PHASE_WAIT_FILE_DATA)
   {
+    YMODEM_LOG_E("EOT in invalid phase=%u", (unsigned int)g_ymodem.phase);
     return ymodem_reject_packet(OTA_YMODEM_STATUS_ERR_PACKET);
   }
 
   if (g_ymodem.eot_count == 0U)
   {
     g_ymodem.eot_count = 1U;
+    YMODEM_LOG_I("first EOT received, send NAK");
     return ymodem_send_control(OTA_YMODEM_NAK);
   }
 
@@ -402,6 +507,7 @@ static ota_ymodem_status_t ymodem_handle_eot(void)
   g_ymodem.phase = YMODEM_PHASE_WAIT_FINISH_PACKET;
   g_ymodem.rx_state = OTA_YMODEM_RX_FIND_HEADER;
 
+  YMODEM_LOG_I("second EOT received, wait finish packet");
   return ymodem_send_bytes(ack_and_crc_request, (uint16_t)sizeof(ack_and_crc_request));
 }
 
@@ -416,6 +522,7 @@ void ota_ymodem_protocol_init(const ota_ymodem_protocol_config_t *config)
 
   g_ymodem.rx_state = OTA_YMODEM_RX_IDLE;
   g_ymodem.phase = YMODEM_PHASE_WAIT_FILE_INFO;
+  YMODEM_LOG_I("protocol init");
 }
 
 ota_ymodem_status_t ota_ymodem_protocol_start_receive(void)
@@ -424,6 +531,7 @@ ota_ymodem_status_t ota_ymodem_protocol_start_receive(void)
 
   if (g_ymodem.config.send == NULL)
   {
+    YMODEM_LOG_E("start receive failed: send callback missing");
     return OTA_YMODEM_STATUS_ERR_SEND;
   }
 
@@ -431,12 +539,14 @@ ota_ymodem_status_t ota_ymodem_protocol_start_receive(void)
   g_ymodem.phase = YMODEM_PHASE_WAIT_FILE_INFO;
   g_ymodem.expected_seq = 0U;
 
+  YMODEM_LOG_I("start receive, send CRC request");
   return ymodem_send_control(OTA_YMODEM_CRC_REQUEST);
 }
 
 void ota_ymodem_protocol_reset(void)
 {
   ymodem_reset_session();
+  YMODEM_LOG_I("protocol reset");
 }
 
 ota_ymodem_status_t ota_ymodem_protocol_input_byte(uint8_t byte)
@@ -456,6 +566,7 @@ ota_ymodem_status_t ota_ymodem_protocol_input_byte(uint8_t byte)
         ++g_ymodem.can_count;
         if (g_ymodem.can_count >= YMODEM_CAN_COUNT_TO_ABORT)
         {
+          YMODEM_LOG_E("host cancelled transfer");
           return ymodem_send_abort(OTA_YMODEM_STATUS_ERR_ABORTED, 0U);
         }
         return OTA_YMODEM_STATUS_OK;
@@ -494,6 +605,11 @@ ota_ymodem_status_t ota_ymodem_protocol_input_byte(uint8_t byte)
         g_ymodem.rx_state = OTA_YMODEM_RX_FIND_HEADER;
         g_ymodem.data_index = 0U;
         ++g_ymodem.error_count;
+        YMODEM_LOG_E("seq inverse invalid: seq=%u inv=%u count=%u/%u",
+                     (unsigned int)g_ymodem.packet_seq,
+                     (unsigned int)byte,
+                     (unsigned int)g_ymodem.error_count,
+                     (unsigned int)ymodem_max_errors());
 
         if (g_ymodem.error_count >= ymodem_max_errors())
         {
@@ -566,6 +682,10 @@ ota_ymodem_status_t ota_ymodem_protocol_tick(uint32_t now_ms)
     return OTA_YMODEM_STATUS_OK;
   }
 
+  YMODEM_LOG_E("packet timeout: state=%s data_index=%u timeout=%lu",
+               ymodem_rx_state_name(g_ymodem.rx_state),
+               (unsigned int)g_ymodem.data_index,
+               (unsigned long)ymodem_packet_timeout_ms());
   return ymodem_reject_packet(OTA_YMODEM_STATUS_ERR_TIMEOUT);
 }
 
