@@ -17,6 +17,7 @@ extern UART_HandleTypeDef huart1;
 #define SHELL_INTERFACE_NAME "shell"
 #define MQTT_INTERFACE_NAME "mqtt"
 #define SHELL_INTERFACE_TX_BUFFER_SIZE 256U
+#define OTA_INTERFACE_TX_BUFFER_SIZE   256U
 
 uart_service_status_t shell_interface_printf(const char *format, ...)
 {
@@ -75,6 +76,27 @@ uart_service_status_t mqtt_interface_printf(const char *format, ...)
   }
 
   return uart_service_send_by_name(MQTT_INTERFACE_NAME, (const uint8_t *)buffer, (uint16_t)(len + 2));
+}
+
+uart_service_status_t ota_interface_send(const uint8_t *data, uint16_t len)
+{
+  uint8_t buffer[OTA_INTERFACE_TX_BUFFER_SIZE];
+
+  if ((data == NULL) || (len == 0U))
+  {
+    return UART_SERVICE_ERR_PARAM;
+  }
+
+  if ((uint32_t)len > (sizeof(buffer) - 2U))
+  {
+    return UART_SERVICE_ERR_PARAM;
+  }
+
+  buffer[0] = '2';
+  buffer[1] = ',';
+  (void)memcpy(&buffer[2], data, len);
+
+  return uart_service_send_by_name(MQTT_INTERFACE_NAME, buffer, (uint16_t)(len + 2U));
 }
 
 static uart_service_status_t shell_interface_on_rx(uart_service_t *uart,
@@ -140,6 +162,34 @@ static const uart_service_config_t uart_service_table[] = {
 
 uart_service_status_t uart_service_port_init(void)
 {
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+  __HAL_RCC_GPIOE_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+
+  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_6, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_SET);
+
+  GPIO_InitStruct.Pin = GPIO_PIN_6;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
+  GPIO_InitStruct.Pin = GPIO_PIN_13;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  GPIO_InitStruct.Pin = GPIO_PIN_15;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
   const uint16_t count = (uint16_t)(sizeof(uart_service_table) / sizeof(uart_service_table[0]));
   uart_service_status_t ret;
 

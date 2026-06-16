@@ -7,7 +7,7 @@
 #include "main.h"
 #include "ota_flash_service.h"
 #include "ota_ymodem_protocol.h"
-#include "uart_service.h"
+#include "uart_service_port.h"
 
 #define OTA_MANAGE_UART_NAME          "mqtt"
 #define OTA_MANAGE_CRC_REQUEST_MS     5000UL
@@ -150,7 +150,7 @@ static void ota_manage_log_app_vector(ota_flash_slot_t slot, uint32_t vector_bas
 static int ota_manage_ymodem_send(const uint8_t *data, uint16_t len, void *user)
 {
   (void)user;
-  if (uart_service_send_by_name(OTA_MANAGE_UART_NAME, data, len) != UART_SERVICE_OK)
+  if (ota_interface_send(data, len) != UART_SERVICE_OK)
   {
     OTA_LOG_E("YMODEM send failed, len=%u", (unsigned int)len);
     return -1;
@@ -164,7 +164,7 @@ static void ota_manage_send_cancel(void)
   static const uint8_t cancel[2] = {OTA_YMODEM_CAN, OTA_YMODEM_CAN};
 
   OTA_LOG_I("send cancel to host");
-  (void)uart_service_send_by_name(OTA_MANAGE_UART_NAME, cancel, (uint16_t)sizeof(cancel));
+  (void)ota_interface_send(cancel, (uint16_t)sizeof(cancel));
 }
 
 static int ota_manage_on_file_begin(const ota_ymodem_file_info_t *file, void *user)
@@ -501,7 +501,7 @@ void ota_manage_service_process(uint32_t now_ms)
                                ? 0U
                                : (OTA_MANAGE_WAIT_TRANSFER_TIMEOUT_MS - wait_elapsed_ms);
 
-    (void)uart_service_send_by_name(OTA_MANAGE_UART_NAME, &crc_request, 1U);
+    (void)ota_interface_send(&crc_request, 1U);
     g_ota_manage.last_crc_request_ms = now_ms;
     OTA_LOG_I("waiting sender, CRC request sent, remain_timeout_ms=%lu",
               (unsigned long)remain_timeout_ms);
