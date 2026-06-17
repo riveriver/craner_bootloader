@@ -1,166 +1,28 @@
 #include "uart_service_port.h"
 
 #include <stddef.h>
-#include <stdarg.h>
-#include <stdio.h>
-#include <string.h>
 
 #include "main.h"
-#include "log_service.h"
-#include "ota_ymodem_protocol.h"
 
-#define LOG_E(format, ...) log_printf("[E] " format "\r\n", ##__VA_ARGS__)
+#define LOG_E(format, ...) (void)shell_interface_printf("[E] " format "\r\n", ##__VA_ARGS__)
 
 extern UART_HandleTypeDef huart5;
 extern UART_HandleTypeDef huart1;
 
-#define SHELL_INTERFACE_NAME "shell"
-#define MQTT_INTERFACE_NAME "mqtt"
-#define SHELL_INTERFACE_TX_BUFFER_SIZE 256U
-#define OTA_INTERFACE_TX_BUFFER_SIZE   256U
-
-uart_service_status_t shell_interface_printf(const char *format, ...)
-{
-  char buffer[SHELL_INTERFACE_TX_BUFFER_SIZE];
-  va_list args;
-  int len;
-
-  if (format == NULL)
-  {
-    return UART_SERVICE_ERR_PARAM;
-  }
-
-  va_start(args, format);
-  len = vsnprintf(buffer, sizeof(buffer), format, args);
-  va_end(args);
-
-  if (len <= 0)
-  {
-    return UART_SERVICE_ERR_PARAM;
-  }
-
-  if ((uint32_t)len >= sizeof(buffer))
-  {
-    len = (int)sizeof(buffer) - 1;
-  }
-
-  return uart_service_send_by_name(SHELL_INTERFACE_NAME, (const uint8_t *)buffer, (uint16_t)len);
-}
-
-uart_service_status_t mqtt_interface_printf(const char *format, ...)
-{
-  char buffer[SHELL_INTERFACE_TX_BUFFER_SIZE];
-  va_list args;
-  int len;
-
-  if (format == NULL)
-  {
-    return UART_SERVICE_ERR_PARAM;
-  }
-
-  buffer[0] = '1';
-  buffer[1] = ',';
-
-  va_start(args, format);
-  len = vsnprintf(&buffer[2], sizeof(buffer) - 2U, format, args);
-  va_end(args);
-
-  if (len <= 0)
-  {
-    return UART_SERVICE_ERR_PARAM;
-  }
-
-  if ((uint32_t)len >= (sizeof(buffer) - 2U))
-  {
-    len = (int)sizeof(buffer) - 3;
-  }
-
-  return uart_service_send_by_name(MQTT_INTERFACE_NAME, (const uint8_t *)buffer, (uint16_t)(len + 2));
-}
-
-uart_service_status_t ota_interface_send(const uint8_t *data, uint16_t len)
-{
-  uint8_t buffer[OTA_INTERFACE_TX_BUFFER_SIZE];
-
-  if ((data == NULL) || (len == 0U))
-  {
-    return UART_SERVICE_ERR_PARAM;
-  }
-
-  if ((uint32_t)len > (sizeof(buffer) - 2U))
-  {
-    return UART_SERVICE_ERR_PARAM;
-  }
-
-  buffer[0] = '2';
-  buffer[1] = ',';
-  (void)memcpy(&buffer[2], data, len);
-
-  return uart_service_send_by_name(MQTT_INTERFACE_NAME, buffer, (uint16_t)(len + 2U));
-}
-
-static uart_service_status_t shell_interface_on_rx(uart_service_t *uart,
-                                                   const uint8_t *data,
-                                                   uint16_t len)
-{
-  (void)uart;
-
-  if (data == NULL)
-  {
-    return UART_SERVICE_ERR_PARAM;
-  }
-
-  return uart_service_send_by_name(SHELL_INTERFACE_NAME, data, len);
-}
-
-static uart_service_status_t mqtt_interface_on_rx(uart_service_t *uart,
-                                                 const uint8_t *data,
-                                                 uint16_t len)
-{
-  (void)uart;
-  if (data == NULL)
-  {
-    return UART_SERVICE_ERR_PARAM;
-  }
-  
-  if (len < 2U)
-  {
-    return UART_SERVICE_ERR_RX;
-  }
-
-  if(data[0] == '1' && data[1] == ',')
-  {
-    shell_interface_printf("mqtt rx: %.*s", len - 2U, &data[2]);
-  }
-  else if(data[0] == '2' && data[1] == ',')
-  {
-    for (uint16_t i = 2U; i < len; ++i)
-    {
-      (void)ota_ymodem_protocol_input_byte(data[i]);
-    }
-  }
-
-  return UART_SERVICE_OK;
-}
-
 static const uart_service_config_t uart_service_table[] = {
   {
-    .name = SHELL_INTERFACE_NAME,
     .huart = &huart5,
-    .rx_callback = shell_interface_on_rx,
-    .tx_timeout_ms = 100U,
-    .rx_timeout_ms = 0U,
+    .name = "shell",
+    .recv_callback = shell_interface_recv_callback,
   },
   {
-    .name = MQTT_INTERFACE_NAME,
     .huart = &huart1,
-    .rx_callback = mqtt_interface_on_rx,
-    .tx_timeout_ms = 100U,
-    .rx_timeout_ms = 0U,
+    .name = "mqtt",
+    .recv_callback = mqtt_interface_recv_callback,
   },
 };
 
-uart_service_status_t uart_service_port_init(void)
+uart_service_status_t uart_service_init_port(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
 
@@ -190,6 +52,8 @@ uart_service_status_t uart_service_port_init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
+  ring_buffer_init(&ota_data_ring, ota_parse_buffer, (uint16_t)sizeof(ota_parse_buffer));
+
   const uint16_t count = (uint16_t)(sizeof(uart_service_table) / sizeof(uart_service_table[0]));
   uart_service_status_t ret;
 
@@ -208,7 +72,7 @@ uart_service_status_t uart_service_port_init(void)
       continue;
     }
 
-    ret = uart_service_start_rx_it(uart_service_table[i].huart);
+    ret = uart_service_start_recv_it(uart_service_table[i].huart);
     if (ret != UART_SERVICE_OK)
     {
       LOG_E("uart service start rx failed: %d", (int)ret);
@@ -219,37 +83,22 @@ uart_service_status_t uart_service_port_init(void)
   return UART_SERVICE_OK;
 }
 
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{
-#if !UART_SEVICE_ENABLE_DMA
-  uart_service_status_t ret = uart_service_on_rx_complete(huart);
-  if (ret != UART_SERVICE_OK)
-  {
-    LOG_E("rx complete failed: %d",(int)ret);
-  }
-#endif
-}
-
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t size)
 {
-#if UART_SEVICE_ENABLE_DMA
-  uart_service_status_t ret = uart_service_on_rx_event(huart, size);
+  uart_service_status_t ret = uart_service_on_recv_event(huart, size);
   if (ret != UART_SERVICE_OK)
   {
     LOG_E("rx event failed: %d", (int)ret);
   }
-#endif
 }
 
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
-#if UART_SEVICE_ENABLE_DMA
-  uart_service_status_t ret = uart_service_on_tx_complete(huart);
+  uart_service_status_t ret = uart_service_on_send_complete(huart);
   if (ret != UART_SERVICE_OK)
   {
     LOG_E("tx complete failed: %d", (int)ret);
   }
-#endif
 }
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
@@ -278,7 +127,7 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
     return;
   }
 
-  status = uart_service_start_rx_it(huart);
+  status = uart_service_start_recv_it(huart);
   if (status != UART_SERVICE_OK)
   {
     LOG_E("restart rx failed: %d", (int)status);

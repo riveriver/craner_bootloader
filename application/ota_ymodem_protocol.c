@@ -1,9 +1,11 @@
 #include "ota_ymodem_protocol.h"
 
 #include <stddef.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 
-#include "log_service.h"
+#include "uart_service_port.h"
 
 #define YMODEM_SOH_DATA_SIZE 128U
 #define YMODEM_STX_DATA_SIZE 1024U
@@ -11,8 +13,37 @@
 #define YMODEM_CAN_COUNT_TO_ABORT 2U
 #define YMODEM_DEFAULT_PACKET_TIMEOUT_MS 1000U
 
-#define YMODEM_LOG_I(format, ...) log_printf("[I][YMODEM] " format "\r\n", ##__VA_ARGS__)
-#define YMODEM_LOG_E(format, ...) log_printf("[E][YMODEM] " format "\r\n", ##__VA_ARGS__)
+static void ymodem_log(const char *level, const char *format, ...)
+{
+  char buffer[192];
+  va_list args;
+  int len;
+
+  if ((level == NULL) || (format == NULL))
+  {
+    return;
+  }
+
+  len = snprintf(buffer, sizeof(buffer), "[%s][YMODEM] ", level);
+  if ((len <= 0) || ((uint32_t)len >= sizeof(buffer)))
+  {
+    return;
+  }
+
+  va_start(args, format);
+  len += vsnprintf(&buffer[len], sizeof(buffer) - (uint32_t)len, format, args);
+  va_end(args);
+
+  if (len <= 0)
+  {
+    return;
+  }
+
+  (void)mqtt_interface_printf("%s", buffer);
+}
+
+#define YMODEM_LOG_I(format, ...)
+#define YMODEM_LOG_E(format, ...) ymodem_log("E", format, ##__VA_ARGS__)
 
 typedef enum
 {

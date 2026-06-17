@@ -1,10 +1,12 @@
 #include "ota_flash_service.h"
 
 #include <stddef.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 
-#include "log_service.h"
 #include "stm32h7xx_hal.h"
+#include "uart_service_port.h"
 
 #define OTA_FLASH_META_MAGIC          0x4F54414DUL
 #define OTA_FLASH_META_STRUCT_VERSION 2UL
@@ -15,8 +17,37 @@
 #define OTA_FLASH_PROGRAM_UNIT        32U
 #define OTA_FLASH_ERASE_VOLTAGE       FLASH_VOLTAGE_RANGE_3
 
-#define OTA_FLASH_LOG_I(format, ...) log_printf("[I][OTA_FLASH] " format "\r\n", ##__VA_ARGS__)
-#define OTA_FLASH_LOG_E(format, ...) log_printf("[E][OTA_FLASH] " format "\r\n", ##__VA_ARGS__)
+static void ota_flash_log(const char *level, const char *format, ...)
+{
+  char buffer[192];
+  va_list args;
+  int len;
+
+  if ((level == NULL) || (format == NULL))
+  {
+    return;
+  }
+
+  len = snprintf(buffer, sizeof(buffer), "[%s][OTA_FLASH] ", level);
+  if ((len <= 0) || ((uint32_t)len >= sizeof(buffer)))
+  {
+    return;
+  }
+
+  va_start(args, format);
+  len += vsnprintf(&buffer[len], sizeof(buffer) - (uint32_t)len, format, args);
+  va_end(args);
+
+  if (len <= 0)
+  {
+    return;
+  }
+
+  (void)mqtt_interface_printf("%s", buffer);
+}
+
+#define OTA_FLASH_LOG_I(format, ...)
+#define OTA_FLASH_LOG_E(format, ...) ota_flash_log("E", format, ##__VA_ARGS__)
 
 typedef struct
 {
