@@ -7,7 +7,6 @@
 
 #include "at_service.h"
 #include "at_service_port.h"
-#include "ota_ymodem_protocol.h"
 #include "ring_buffer.h"
 
 #define SHELL_INTERFACE_NAME "shell"
@@ -232,18 +231,12 @@ uart_service_status_t mqtt_interface_recv_callback(uart_service_t *uart,
   return UART_SERVICE_OK;
 }
 
-void uart_service_port_process(void)
+const uint8_t *uart_service_port_get_ota_read_ptr(uint16_t *len)
 {
-  const uint8_t *data;
-  uint16_t len;
+  return ring_buffer_get_read_ptr(&ota_data_ring, len);
+}
 
-  while ((data = ring_buffer_get_read_ptr(&ota_data_ring, &len)) != NULL)
-  {
-    for (uint16_t i = 0U; i < len; ++i)
-    {
-      (void)ota_ymodem_protocol_input_byte(data[i]);
-    }
-
-    ring_buffer_update_read_ptr(&ota_data_ring, len);
-  }
+void uart_service_port_consume_ota_data(uint16_t len)
+{
+  ring_buffer_update_read_ptr(&ota_data_ring, len);
 }

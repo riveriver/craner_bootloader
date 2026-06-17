@@ -119,9 +119,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    const uint32_t now_ms = HAL_GetTick();
-    uart_service_port_process();
-    ota_manage_service_process(now_ms);
+    ota_manage_service_process(HAL_GetTick());
     HAL_Delay(1U);
   }
   /* USER CODE END 3 */

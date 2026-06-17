@@ -565,6 +565,19 @@ ota_manage_status_t ota_manage_service_start(void)
 
 void ota_manage_service_process(uint32_t now_ms)
 {
+  const uint8_t *data;
+  uint16_t len;
+
+  while ((data = uart_service_port_get_ota_read_ptr(&len)) != NULL)
+  {
+    for (uint16_t i = 0U; i < len; ++i)
+    {
+      (void)ota_ymodem_protocol_input_byte(data[i]);
+    }
+
+    uart_service_port_consume_ota_data(len);
+  }
+
   if ((g_ota_manage.state == OTA_MANAGE_STATE_WAIT_TRANSFER) &&
       (ota_ymodem_protocol_get_state() != OTA_YMODEM_RX_FIND_HEADER))
   {
