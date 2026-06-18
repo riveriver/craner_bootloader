@@ -29,28 +29,28 @@ void uart_service_port_init_ring_buffer(void)
                    (uint16_t)sizeof(ota_parse_buffer));
 }
 
-uart_service_status_t shell_interface_send(const uint8_t *data, uint16_t len)
+int32_t shell_interface_send(const uint8_t *data, uint16_t len)
 {
   if ((data == NULL) || (len == 0U))
   {
-    return UART_SERVICE_ERR_PARAM;
+    return (int32_t)UART_SERVICE_ERR_PARAM;
   }
 
-  return uart_service_send_by_name(SHELL_INTERFACE_NAME, data, len);
+  return (int32_t)uart_service_send_by_name(SHELL_INTERFACE_NAME, data, len);
 }
 
-uart_service_status_t mqtt_interface_send(const uint8_t *data, uint16_t len)
+int32_t mqtt_interface_send(const uint8_t *data, uint16_t len)
 {
   if ((data == NULL) || (len == 0U) || ((uint32_t)len > (sizeof(mqtt_send_buffer) - MQTT_PREFIX_SIZE)))
   {
-    return UART_SERVICE_ERR_PARAM;
+    return (int32_t)UART_SERVICE_ERR_PARAM;
   }
 
   mqtt_send_buffer[0] = '1';
   mqtt_send_buffer[1] = ',';
   (void)memcpy(&mqtt_send_buffer[MQTT_PREFIX_SIZE], data, len);
 
-  return uart_service_send_by_name(MQTT_INTERFACE_NAME, mqtt_send_buffer, (uint16_t)(len + MQTT_PREFIX_SIZE));
+  return (int32_t)uart_service_send_by_name(MQTT_INTERFACE_NAME, mqtt_send_buffer, (uint16_t)(len + MQTT_PREFIX_SIZE));
 }
 
 static uint8_t uart_port_handle_at_command(const uint8_t *data, uint16_t len, uint8_t mqtt_reply)

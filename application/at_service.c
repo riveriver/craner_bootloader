@@ -125,7 +125,7 @@ int32_t at_service_send_reply(at_service_reply_send_fn_t send_fn, const char *re
     return AT_SERVICE_ERR_PARAM;
   }
 
-  return send_fn((uint8_t *)reply, (uint16_t)strlen(reply));
+  return send_fn((const uint8_t *)reply, (uint16_t)strlen(reply));
 }
 
 int32_t at_service_send_ok(at_service_reply_send_fn_t send_fn, const char *prefix)

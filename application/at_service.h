@@ -17,7 +17,7 @@ typedef enum
   AT_SERVICE_ERR_UNSUPPORTED = -3,
 } at_service_ret_t;
 
-typedef int32_t (*at_service_reply_send_fn_t)(uint8_t *buf, uint16_t len);
+typedef int32_t (*at_service_reply_send_fn_t)(const uint8_t *buf, uint16_t len);
 
 typedef struct at_service_request_t at_service_request_t;
 typedef int32_t (*at_service_handler_fn_t)(const at_service_request_t *request);
