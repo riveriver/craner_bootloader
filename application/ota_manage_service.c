@@ -20,37 +20,8 @@ extern UART_HandleTypeDef huart8;
 #define OTA_MANAGE_PROBE_WAIT_TRANSFER_TIMEOUT_MS    6000UL
 #define OTA_MANAGE_PACKET_TIMEOUT_MS                 1000UL
 
-static void ota_manage_log(const char *level, const char *format, ...)
-{
-  char buffer[192];
-  va_list args;
-  int len;
-
-  if ((level == NULL) || (format == NULL))
-  {
-    return;
-  }
-
-  len = snprintf(buffer, sizeof(buffer), "[%s][OTA] ", level);
-  if ((len <= 0) || ((uint32_t)len >= sizeof(buffer)))
-  {
-    return;
-  }
-
-  va_start(args, format);
-  len += vsnprintf(&buffer[len], sizeof(buffer) - (uint32_t)len, format, args);
-  va_end(args);
-
-  if (len <= 0)
-  {
-    return;
-  }
-
-  (void)mqtt_interface_printf("%s", buffer);
-}
-
-#define OTA_LOG_I(format, ...) ota_manage_log("I", format, ##__VA_ARGS__)
-#define OTA_LOG_E(format, ...) ota_manage_log("E", format, ##__VA_ARGS__)
+#define OTA_LOG_I(format, ...) (void)shell_interface_printf("[I][OTA] " format "\r\n", ##__VA_ARGS__)
+#define OTA_LOG_E(format, ...) (void)shell_interface_printf("[E][OTA] " format "\r\n", ##__VA_ARGS__)
 
 typedef void (*ota_app_entry_t)(void);
 
@@ -129,7 +100,7 @@ static void ota_manage_notify_error(const char *format, ...)
     len = (int)sizeof(buffer) - 1;
   }
 
-  (void)mqtt_interface_printf("OTA ERROR: %s", buffer);
+  (void)shell_interface_printf("OTA ERROR: %s\r\n", buffer);
 }
 
 static const char *ota_manage_flash_status_name(ota_flash_status_t status)
@@ -704,6 +675,7 @@ void ota_manage_service_jump_to_active_app(void)
   app_reset = *((const uint32_t *)(app_addr + 4U));
   app_entry = (ota_app_entry_t)app_reset;
 
+  HAL_Delay(20U);
   ota_manage_disable_all_irqs();
 
   HAL_UART_DeInit(&huart5);
