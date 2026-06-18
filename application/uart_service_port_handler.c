@@ -5,8 +5,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "at_service.h"
-#include "at_service_port.h"
 #include "ring_buffer.h"
 
 #define SHELL_INTERFACE_NAME "shell"
@@ -51,38 +49,6 @@ int32_t mqtt_interface_send(const uint8_t *data, uint16_t len)
   (void)memcpy(&mqtt_send_buffer[MQTT_PREFIX_SIZE], data, len);
 
   return (int32_t)uart_service_send_by_name(MQTT_INTERFACE_NAME, mqtt_send_buffer, (uint16_t)(len + MQTT_PREFIX_SIZE));
-}
-
-static uint8_t uart_port_handle_at_command(const uint8_t *data, uint16_t len, uint8_t mqtt_reply)
-{
-  int32_t ret;
-
-  if ((data == NULL) || (len == 0U))
-  {
-    return 0U;
-  }
-
-  ret = at_service_port_process(data,
-                                len,
-                                (mqtt_reply != 0U) ? mqtt_interface_send : shell_interface_send);
-  if (ret == AT_SERVICE_PREFIX_NOT_MATCH)
-  {
-    return 0U;
-  }
-
-  if ((ret != AT_SERVICE_OK) && (ret != AT_SERVICE_ACTION_EXECUTION_FAILED))
-  {
-    if (mqtt_reply != 0U)
-    {
-      (void)at_service_send_error(mqtt_interface_send, "craner");
-    }
-    else
-    {
-      (void)at_service_send_error(shell_interface_send, "craner");
-    }
-  }
-
-  return 1U;
 }
 
 uart_service_status_t shell_interface_printf(const char *format, ...)
@@ -169,11 +135,6 @@ uart_service_status_t shell_interface_recv_callback(uart_service_t *uart,
     return UART_SERVICE_ERR_PARAM;
   }
 
-  if (uart_port_handle_at_command(data, len, 0U) != 0U)
-  {
-    return UART_SERVICE_OK;
-  }
-
   return shell_interface_send(data, len);
 }
 
@@ -181,61 +142,46 @@ uart_service_status_t mqtt_interface_recv_callback(uart_service_t *uart,
                                            const uint8_t *data,
                                            uint16_t len)
 {
-  const uint8_t *payload;
-  uint16_t payload_len;
-  uint16_t head;
-  uint16_t first;
-
-  (void)uart;
-
-  if (data == NULL)
+  if (data == NULL|| len == 0U)
   {
     return UART_SERVICE_ERR_PARAM;
   }
 
-  if ((len < 3U) || (data[1] != (uint8_t)','))
+  if ((len < 3U) &&  (data[0] == (uint8_t)'1') && (data[1] != (uint8_t)','))
   {
-    return UART_SERVICE_ERR_RECV;
-  }
-
-  payload = &data[2];
-  payload_len = (uint16_t)(len - 2U);
-
-  if (data[0] == (uint8_t)'1')
+    mqtt_interface_send(data, len);
+    return UART_SERVICE_OK;
+  }else if ((len >= 3U) && (data[0] == (uint8_t)'2') && (data[1] == (uint8_t)','))
   {
-    if (uart_port_handle_at_command(payload, payload_len, 1U) == 0U)
+    const uint8_t *payload = &data[2];
+    uint16_t payload_len = (uint16_t)(len - 2U);
+    uint16_t head = ota_data_ring.head;
+    uint16_t first = (uint16_t)(ota_data_ring.size - head);
+    if (first > payload_len)
     {
-      (void)shell_interface_printf("mqtt rx: %.*s", (int)payload_len, (const char *)payload);
+      first = payload_len;
     }
 
+    (void)memcpy(&ota_data_ring.data[head], payload, first);
+    if (payload_len > first)
+    {
+      (void)memcpy(ota_data_ring.data, &payload[first], (uint16_t)(payload_len - first));
+    }
+
+    head = (uint16_t)(head + payload_len);
+    if (head >= ota_data_ring.size)
+    {
+      head = (uint16_t)(head - ota_data_ring.size);
+    }
+    ring_buffer_update_write_ptr(&ota_data_ring, head);
+    return UART_SERVICE_OK;
+  }else
+  {
+    mqtt_interface_send(data, len);
+    shell_interface_send(data, len);
     return UART_SERVICE_OK;
   }
-
-  if (data[0] != (uint8_t)'2')
-  {
-    return UART_SERVICE_ERR_RECV;
-  }
-
-  head = ota_data_ring.head;
-  first = (uint16_t)(ota_data_ring.size - head);
-  if (first > payload_len)
-  {
-    first = payload_len;
-  }
-
-  (void)memcpy(&ota_data_ring.data[head], payload, first);
-  if (payload_len > first)
-  {
-    (void)memcpy(ota_data_ring.data, &payload[first], (uint16_t)(payload_len - first));
-  }
-
-  head = (uint16_t)(head + payload_len);
-  if (head >= ota_data_ring.size)
-  {
-    head = (uint16_t)(head - ota_data_ring.size);
-  }
-  ring_buffer_update_write_ptr(&ota_data_ring, head);
-  return UART_SERVICE_OK;
+  (void)uart;
 }
 
 const uint8_t *uart_service_port_get_ota_read_ptr(uint16_t *len)
