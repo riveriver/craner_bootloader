@@ -52,7 +52,7 @@ uart_service_status_t uart_service_init_port(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  ring_buffer_init(&ota_data_ring, ota_parse_buffer, (uint16_t)sizeof(ota_parse_buffer));
+  uart_service_port_init_ring_buffer();
 
   const uint16_t count = (uint16_t)(sizeof(uart_service_table) / sizeof(uart_service_table[0]));
   uart_service_status_t ret;

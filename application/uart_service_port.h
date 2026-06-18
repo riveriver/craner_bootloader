@@ -8,8 +8,10 @@ extern "C" {
 #include <stdint.h>
 
 #include "uart_service.h"
+#include "ring_buffer.h"
 
 uart_service_status_t uart_service_init_port(void);
+void uart_service_port_init_ring_buffer(void);
 uart_service_status_t shell_interface_send(const uint8_t *data, uint16_t len);
 uart_service_status_t mqtt_interface_send(const uint8_t *data, uint16_t len);
 uart_service_status_t shell_interface_printf(const char *format, ...);

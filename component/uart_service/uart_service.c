@@ -6,7 +6,6 @@ static uart_service_t uart_service_ports[8U] = {0};
 
 static const uint32_t uart_service_max_ports =
     (uint32_t)(sizeof(uart_service_ports) / sizeof(uart_service_ports[0]));
-static const uint32_t uart_service_send_default_timeout_ms = 1000U;
 
 static uart_service_status_t uart_service_mapping_hal_status(HAL_StatusTypeDef status,
                                                    uart_service_status_t error)

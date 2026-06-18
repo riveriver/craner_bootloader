@@ -22,6 +22,13 @@ static uint8_t mqtt_printf_buffer[MQTT_PRINTF_BUFFER_SIZE];
 static uint8_t mqtt_send_buffer[MQTT_PRINTF_BUFFER_SIZE + MQTT_PREFIX_SIZE];
 static uint8_t ota_ack_buffer[128U];
 
+void uart_service_port_init_ring_buffer(void)
+{
+  ring_buffer_init(&ota_data_ring,
+                   ota_parse_buffer,
+                   (uint16_t)sizeof(ota_parse_buffer));
+}
+
 uart_service_status_t shell_interface_send(const uint8_t *data, uint16_t len)
 {
   if ((data == NULL) || (len == 0U))
