@@ -15,10 +15,13 @@ extern UART_HandleTypeDef huart5;
 extern UART_HandleTypeDef huart8;
 
 #define OTA_MANAGE_REQUEST_CRC_REQUEST_MS            5000UL
-#define OTA_MANAGE_REQUEST_WAIT_TRANSFER_TIMEOUT_MS  60000UL
+#define OTA_MANAGE_REQUEST_WAIT_TRANSFER_TIMEOUT_MS  180000UL
 #define OTA_MANAGE_PROBE_CRC_REQUEST_MS              2000UL
 #define OTA_MANAGE_PROBE_WAIT_TRANSFER_TIMEOUT_MS    6000UL
+#define OTA_MANAGE_RESCUE_CRC_REQUEST_MS             5000UL
+#define OTA_MANAGE_RESCUE_WAIT_TRANSFER_TIMEOUT_MS   180000UL
 #define OTA_MANAGE_PACKET_TIMEOUT_MS                 1000UL
+#define OTA_MANAGE_RESCUE_RESTART_INTERVAL_MS        1000UL
 
 #define OTA_LOG_I(format, ...) (void)shell_interface_printf("[I][OTA] " format "\r\n", ##__VA_ARGS__)
 #define OTA_LOG_E(format, ...) (void)shell_interface_printf("[E][OTA] " format "\r\n", ##__VA_ARGS__)
@@ -34,9 +37,11 @@ typedef struct
   uint32_t image_crc32;
   uint32_t last_crc_request_ms;
   uint32_t wait_transfer_start_ms;
+  uint32_t last_rescue_restart_ms;
   uint32_t crc_request_interval_ms;
   uint32_t wait_transfer_timeout_ms;
   uint8_t ota_requested;
+  uint8_t rescue_mode;
   uint8_t file_started;
 } ota_manage_context_t;
 
@@ -208,6 +213,7 @@ static uint8_t ota_manage_recover_boot_slot(ota_flash_slot_t failed_slot)
   meta.active_slot = boot_slot;
   meta.ota_request = OTA_FLASH_OTA_REQUEST_NONE;
   meta.target_slot = OTA_FLASH_SLOT_NONE;
+  meta.boot_count = 0U;
 
   if (ota_flash_is_valid_slot(failed_slot) != 0U)
   {
@@ -247,6 +253,39 @@ static int ota_manage_ymodem_send(const uint8_t *data, uint16_t len, void *user)
   }
 
   return 0;
+}
+
+static void ota_manage_restart_rescue_receive(uint32_t now_ms)
+{
+  ota_ymodem_status_t ymodem_status;
+
+  if (g_ota_manage.rescue_mode == 0U)
+  {
+    return;
+  }
+
+  if ((uint32_t)(now_ms - g_ota_manage.last_rescue_restart_ms) < OTA_MANAGE_RESCUE_RESTART_INTERVAL_MS)
+  {
+    return;
+  }
+
+  g_ota_manage.last_rescue_restart_ms = now_ms;
+  ymodem_status = ota_ymodem_protocol_start_receive();
+  if (ymodem_status != OTA_YMODEM_STATUS_OK)
+  {
+    OTA_LOG_E("rescue restart failed: status=%s(%d)",
+              ota_manage_ymodem_status_name(ymodem_status),
+              (int)ymodem_status);
+    return;
+  }
+
+  g_ota_manage.file_started = 0U;
+  g_ota_manage.write_slot = OTA_FLASH_SLOT_NONE;
+  g_ota_manage.last_crc_request_ms = now_ms;
+  g_ota_manage.wait_transfer_start_ms = now_ms;
+  g_ota_manage.state = OTA_MANAGE_STATE_WAIT_TRANSFER;
+  OTA_LOG_E("rescue mode: restart OTA receive target_slot=%s",
+            ota_manage_slot_name(g_ota_manage.requested_slot));
 }
 
 static void ota_manage_send_cancel(void)
@@ -477,10 +516,18 @@ ota_manage_status_t ota_manage_service_init(void)
 ota_manage_status_t ota_manage_service_start(void)
 {
   ota_flash_slot_t active_slot = ota_flash_get_active_slot();
+  ota_flash_slot_t boot_slot;
   ota_flash_status_t flash_status;
   ota_ymodem_status_t ymodem_status;
 
-  if (g_ota_manage.ota_requested == 0U)
+  if (ota_manage_find_bootable_slot(active_slot, &boot_slot) == 0U)
+  {
+    g_ota_manage.rescue_mode = 1U;
+    g_ota_manage.requested_slot = ota_flash_get_inactive_slot();
+    g_ota_manage.crc_request_interval_ms = OTA_MANAGE_RESCUE_CRC_REQUEST_MS;
+    g_ota_manage.wait_transfer_timeout_ms = OTA_MANAGE_RESCUE_WAIT_TRANSFER_TIMEOUT_MS;
+  }
+  else if (g_ota_manage.ota_requested == 0U)
   {
     g_ota_manage.requested_slot = ota_flash_get_inactive_slot();
     g_ota_manage.crc_request_interval_ms = OTA_MANAGE_PROBE_CRC_REQUEST_MS;
@@ -526,11 +573,21 @@ ota_manage_status_t ota_manage_service_start(void)
   g_ota_manage.last_crc_request_ms = HAL_GetTick();
   g_ota_manage.wait_transfer_start_ms = g_ota_manage.last_crc_request_ms;
   g_ota_manage.state = OTA_MANAGE_STATE_WAIT_TRANSFER;
-  OTA_LOG_I("waiting YMODEM: request=%u target_slot=%s interval_ms=%lu timeout_ms=%lu",
-            (unsigned int)g_ota_manage.ota_requested,
-            ota_manage_slot_name(g_ota_manage.requested_slot),
-            (unsigned long)g_ota_manage.crc_request_interval_ms,
-            (unsigned long)g_ota_manage.wait_transfer_timeout_ms);
+  if (g_ota_manage.rescue_mode != 0U)
+  {
+    OTA_LOG_E("rescue mode: no bootable app, waiting OTA target_slot=%s interval_ms=%lu timeout_ms=%lu",
+              ota_manage_slot_name(g_ota_manage.requested_slot),
+              (unsigned long)g_ota_manage.crc_request_interval_ms,
+              (unsigned long)g_ota_manage.wait_transfer_timeout_ms);
+  }
+  else
+  {
+    OTA_LOG_I("waiting YMODEM: request=%u target_slot=%s interval_ms=%lu timeout_ms=%lu",
+              (unsigned int)g_ota_manage.ota_requested,
+              ota_manage_slot_name(g_ota_manage.requested_slot),
+              (unsigned long)g_ota_manage.crc_request_interval_ms,
+              (unsigned long)g_ota_manage.wait_transfer_timeout_ms);
+  }
   return OTA_MANAGE_OK;
 }
 
@@ -538,6 +595,11 @@ void ota_manage_service_process(uint32_t now_ms)
 {
   const uint8_t *data;
   uint16_t len;
+
+  if ((g_ota_manage.state == OTA_MANAGE_STATE_ERROR) && (g_ota_manage.rescue_mode != 0U))
+  {
+    ota_manage_restart_rescue_receive(now_ms);
+  }
 
   while ((data = uart_service_port_get_ota_read_ptr(&len)) != NULL)
   {
@@ -555,12 +617,22 @@ void ota_manage_service_process(uint32_t now_ms)
     g_ota_manage.state = OTA_MANAGE_STATE_RECEIVING;
   }
 
-  if (g_ota_manage.state == OTA_MANAGE_STATE_WAIT_TRANSFER)
+  if ((g_ota_manage.state == OTA_MANAGE_STATE_WAIT_TRANSFER) &&
+      (g_ota_manage.wait_transfer_timeout_ms != 0U))
   {
     uint32_t wait_elapsed_ms = now_ms - g_ota_manage.wait_transfer_start_ms;
 
     if (wait_elapsed_ms >= g_ota_manage.wait_transfer_timeout_ms)
     {
+      if (g_ota_manage.rescue_mode != 0U)
+      {
+        OTA_LOG_E("rescue waiting first packet timeout: waited_ms=%lu timeout_ms=%lu, reset",
+                  (unsigned long)wait_elapsed_ms,
+                  (unsigned long)g_ota_manage.wait_transfer_timeout_ms);
+        HAL_Delay(20U);
+        NVIC_SystemReset();
+      }
+
       OTA_LOG_E("waiting sender timeout: waited_ms=%lu timeout_ms=%lu",
                 (unsigned long)wait_elapsed_ms,
                 (unsigned long)g_ota_manage.wait_transfer_timeout_ms);
