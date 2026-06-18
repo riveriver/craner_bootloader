@@ -20,37 +20,37 @@ extern UART_HandleTypeDef huart8;
 #define OTA_MANAGE_PROBE_WAIT_TRANSFER_TIMEOUT_MS    6000UL
 #define OTA_MANAGE_PACKET_TIMEOUT_MS                 1000UL
 
-static void ota_manage_log(const char *level, const char *format, ...)
-{
-  char buffer[192];
-  va_list args;
-  int len;
+// static void ota_manage_log(const char *level, const char *format, ...)
+// {
+//   char buffer[192];
+//   va_list args;
+//   int len;
 
-  if ((level == NULL) || (format == NULL))
-  {
-    return;
-  }
+//   if ((level == NULL) || (format == NULL))
+//   {
+//     return;
+//   }
 
-  len = snprintf(buffer, sizeof(buffer), "[%s][OTA] ", level);
-  if ((len <= 0) || ((uint32_t)len >= sizeof(buffer)))
-  {
-    return;
-  }
+//   len = snprintf(buffer, sizeof(buffer), "[%s][OTA] ", level);
+//   if ((len <= 0) || ((uint32_t)len >= sizeof(buffer)))
+//   {
+//     return;
+//   }
 
-  va_start(args, format);
-  len += vsnprintf(&buffer[len], sizeof(buffer) - (uint32_t)len, format, args);
-  va_end(args);
+//   va_start(args, format);
+//   len += vsnprintf(&buffer[len], sizeof(buffer) - (uint32_t)len, format, args);
+//   va_end(args);
 
-  if (len <= 0)
-  {
-    return;
-  }
+//   if (len <= 0)
+//   {
+//     return;
+//   }
 
-  (void)mqtt_interface_printf("%s", buffer);
-}
+//   (void)mqtt_interface_printf("%s", buffer);
+// }
 
-#define OTA_LOG_I(format, ...) ota_manage_log("I", format, ##__VA_ARGS__)
-#define OTA_LOG_E(format, ...) ota_manage_log("E", format, ##__VA_ARGS__)
+#define OTA_LOG_I(format, ...) shell_interface_printf("I", format, ##__VA_ARGS__)
+#define OTA_LOG_E(format, ...) shell_interface_printf("E", format, ##__VA_ARGS__)
 
 typedef void (*ota_app_entry_t)(void);
 
