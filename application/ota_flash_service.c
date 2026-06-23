@@ -1,7 +1,6 @@
 #include "ota_flash_service.h"
 
 #include <stddef.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -16,38 +15,10 @@
 #define OTA_FLASH_BANK_SIZE           0x00100000UL
 #define OTA_FLASH_PROGRAM_UNIT        32U
 #define OTA_FLASH_ERASE_VOLTAGE       FLASH_VOLTAGE_RANGE_3
+#define OTA_FLASH_CONFIRM_MAX_ATTEMPTS 3UL
 
-static void ota_flash_log(const char *level, const char *format, ...)
-{
-  char buffer[192];
-  va_list args;
-  int len;
-
-  if ((level == NULL) || (format == NULL))
-  {
-    return;
-  }
-
-  len = snprintf(buffer, sizeof(buffer), "[%s][OTA_FLASH] ", level);
-  if ((len <= 0) || ((uint32_t)len >= sizeof(buffer)))
-  {
-    return;
-  }
-
-  va_start(args, format);
-  len += vsnprintf(&buffer[len], sizeof(buffer) - (uint32_t)len, format, args);
-  va_end(args);
-
-  if (len <= 0)
-  {
-    return;
-  }
-
-  (void)mqtt_interface_printf("%s", buffer);
-}
-
-#define OTA_FLASH_LOG_I(format, ...)
-#define OTA_FLASH_LOG_E(format, ...) ota_flash_log("E", format, ##__VA_ARGS__)
+#define OTA_FLASH_LOG_I(format, ...) (void)shell_interface_printf("[I][OTA_FLASH] " format "\r\n", ##__VA_ARGS__)
+#define OTA_FLASH_LOG_E(format, ...) (void)shell_interface_printf("[E][OTA_FLASH] " format "\r\n", ##__VA_ARGS__)
 
 typedef struct
 {
@@ -81,6 +52,21 @@ static const char *ota_flash_slot_name(ota_flash_slot_t slot)
 static uint8_t ota_flash_slot_index(ota_flash_slot_t slot)
 {
   return (slot == OTA_FLASH_SLOT_B) ? 1U : 0U;
+}
+
+static ota_flash_slot_t ota_flash_other_slot(ota_flash_slot_t slot)
+{
+  if (slot == OTA_FLASH_SLOT_A)
+  {
+    return OTA_FLASH_SLOT_B;
+  }
+
+  if (slot == OTA_FLASH_SLOT_B)
+  {
+    return OTA_FLASH_SLOT_A;
+  }
+
+  return OTA_FLASH_SLOT_NONE;
 }
 
 static uint32_t ota_flash_meta_crc(const ota_flash_meta_t *meta)
@@ -129,6 +115,106 @@ static ota_flash_status_t ota_flash_get_bank_sector(uint32_t address,
 
   *sector = (address - bank_base) / OTA_FLASH_SECTOR_SIZE;
   return OTA_FLASH_OK;
+}
+
+static uint8_t ota_flash_slot_has_valid_app(ota_flash_slot_t slot)
+{
+  uint32_t addr;
+
+  if (ota_flash_is_valid_slot(slot) == 0U)
+  {
+    return 0U;
+  }
+
+  addr = ota_flash_get_slot_address(slot);
+  return (uint8_t)((addr != 0U) && (ota_flash_is_valid_app(addr) != 0U));
+}
+
+static ota_flash_status_t ota_flash_rollback_pending_slot(ota_flash_meta_t *meta,
+                                                          ota_flash_slot_t pending_slot)
+{
+  ota_flash_slot_t rollback_slot;
+  uint8_t pending_index;
+  uint8_t rollback_index;
+
+  if ((meta == NULL) || (ota_flash_is_valid_slot(pending_slot) == 0U))
+  {
+    return OTA_FLASH_ERR_PARAM;
+  }
+
+  rollback_slot = ota_flash_other_slot(pending_slot);
+  if ((ota_flash_is_valid_slot(rollback_slot) == 0U) ||
+      (ota_flash_slot_has_valid_app(rollback_slot) == 0U))
+  {
+    OTA_FLASH_LOG_E("pending rollback failed: pending=%s rollback=%s invalid",
+                    ota_flash_slot_name(pending_slot),
+                    ota_flash_slot_name(rollback_slot));
+    return OTA_FLASH_ERR_STATE;
+  }
+
+  pending_index = ota_flash_slot_index(pending_slot);
+  rollback_index = ota_flash_slot_index(rollback_slot);
+
+  meta->active_slot = rollback_slot;
+  meta->ota_request = OTA_FLASH_OTA_REQUEST_NONE;
+  meta->target_slot = OTA_FLASH_SLOT_NONE;
+  meta->boot_count = 0U;
+
+  meta->image[rollback_index].address = ota_flash_get_slot_address(rollback_slot);
+  meta->image[rollback_index].state = OTA_FLASH_IMAGE_VALID;
+
+  meta->image[pending_index].size = 0U;
+  meta->image[pending_index].crc32 = 0U;
+  meta->image[pending_index].state = OTA_FLASH_IMAGE_EMPTY;
+
+  OTA_FLASH_LOG_E("pending app not confirmed, rollback %s -> %s",
+                  ota_flash_slot_name(pending_slot),
+                  ota_flash_slot_name(rollback_slot));
+  return ota_flash_write_meta(meta);
+}
+
+static ota_flash_status_t ota_flash_handle_pending_boot(ota_flash_meta_t *meta)
+{
+  ota_flash_slot_t active_slot;
+  uint8_t active_index;
+
+  if (meta == NULL)
+  {
+    return OTA_FLASH_ERR_PARAM;
+  }
+
+  active_slot = (ota_flash_slot_t)meta->active_slot;
+  if (ota_flash_is_valid_slot(active_slot) == 0U)
+  {
+    return OTA_FLASH_ERR_META;
+  }
+
+  active_index = ota_flash_slot_index(active_slot);
+  if (meta->image[active_index].state != OTA_FLASH_IMAGE_PENDING)
+  {
+    return OTA_FLASH_OK;
+  }
+
+  if (meta->boot_count >= OTA_FLASH_CONFIRM_MAX_ATTEMPTS)
+  {
+    ota_flash_status_t status = ota_flash_rollback_pending_slot(meta, active_slot);
+    if (status != OTA_FLASH_OK)
+    {
+      OTA_FLASH_LOG_E("pending rollback unavailable, keep trying slot=%s",
+                      ota_flash_slot_name(active_slot));
+      return OTA_FLASH_OK;
+    }
+
+    return status;
+  }
+
+  meta->boot_count++;
+  OTA_FLASH_LOG_I("pending app trial: slot=%s attempt=%lu/%lu",
+                  ota_flash_slot_name(active_slot),
+                  (unsigned long)meta->boot_count,
+                  (unsigned long)OTA_FLASH_CONFIRM_MAX_ATTEMPTS);
+
+  return ota_flash_write_meta(meta);
 }
 
 static ota_flash_status_t ota_flash_erase_range(uint32_t address, uint32_t len)
@@ -284,6 +370,7 @@ ota_flash_status_t ota_flash_service_init(void)
 {
   ota_flash_meta_t meta;
   ota_flash_status_t status;
+  static uint8_t pending_boot_checked = 0U;
 
   OTA_FLASH_LOG_I("service init");
   (void)memset(&g_flash_write, 0, sizeof(g_flash_write));
@@ -291,6 +378,22 @@ ota_flash_status_t ota_flash_service_init(void)
   status = ota_flash_read_meta(&meta);
   if (status == OTA_FLASH_OK)
   {
+    if (pending_boot_checked == 0U)
+    {
+      pending_boot_checked = 1U;
+      status = ota_flash_handle_pending_boot(&meta);
+      if (status != OTA_FLASH_OK)
+      {
+        return status;
+      }
+
+      status = ota_flash_read_meta(&meta);
+      if (status != OTA_FLASH_OK)
+      {
+        return status;
+      }
+    }
+
     OTA_FLASH_LOG_I("meta ok: active_slot=%s request=%lu target=%s boot_count=%lu",
                     ota_flash_slot_name((ota_flash_slot_t)meta.active_slot),
                     (unsigned long)meta.ota_request,
@@ -710,17 +813,16 @@ ota_flash_status_t ota_flash_mark_pending(ota_flash_slot_t slot,
   meta.image[index].address = ota_flash_get_slot_address(slot);
   meta.image[index].size = image_size;
   meta.image[index].crc32 = image_crc32;
-  meta.image[index].state = OTA_FLASH_IMAGE_VALID;
+  meta.image[index].state = OTA_FLASH_IMAGE_PENDING;
   meta.active_slot = slot;
   meta.ota_request = OTA_FLASH_OTA_REQUEST_NONE;
   meta.target_slot = OTA_FLASH_SLOT_NONE;
-  ++meta.boot_count;
+  meta.boot_count = 0U;
 
-  OTA_FLASH_LOG_I("mark pending: slot=%s size=%lu crc=0x%08lx boot_count=%lu",
+  OTA_FLASH_LOG_I("mark pending: slot=%s size=%lu crc=0x%08lx",
                   ota_flash_slot_name(slot),
                   (unsigned long)image_size,
-                  (unsigned long)image_crc32,
-                  (unsigned long)meta.boot_count);
+                  (unsigned long)image_crc32);
 
   return ota_flash_write_meta(&meta);
 }

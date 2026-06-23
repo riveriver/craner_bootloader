@@ -107,6 +107,8 @@ int main(void)
   MX_UART5_Init();
   /* USER CODE BEGIN 2 */
   (void)uart_service_init_port();
+  (void)shell_interface_printf("\r\n[I][BOOT] craner bootloader start\r\n");
+  (void)shell_interface_printf("[I][BOOT] uart shell=UART5 mqtt=USART1\r\n");
   (void)ota_manage_service_init();
   (void)ota_manage_service_start();
 
