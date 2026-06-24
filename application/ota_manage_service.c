@@ -291,8 +291,13 @@ static void ota_manage_restart_rescue_receive(uint32_t now_ms)
 static void ota_manage_send_cancel(void)
 {
   static const uint8_t cancel[2] = {OTA_YMODEM_CAN, OTA_YMODEM_CAN};
-
   (void)ota_ack_send(cancel, (uint16_t)sizeof(cancel));
+}
+
+static void ota_manage_send_crc_request(void)
+{
+  uint8_t crc_request = OTA_YMODEM_CRC_REQUEST;
+  (void)ota_ack_send(&crc_request, 1U);
 }
 
 static int ota_manage_on_file_begin(const ota_ymodem_file_info_t *file, void *user)
@@ -656,8 +661,7 @@ void ota_manage_service_process(uint32_t now_ms)
   if ((g_ota_manage.state == OTA_MANAGE_STATE_WAIT_TRANSFER) &&
       ((uint32_t)(now_ms - g_ota_manage.last_crc_request_ms) >= g_ota_manage.crc_request_interval_ms))
   {
-    uint8_t crc_request = OTA_YMODEM_CRC_REQUEST;
-    (void)ota_ack_send(&crc_request, 1U);
+    ota_manage_send_crc_request();
     g_ota_manage.last_crc_request_ms = now_ms;
   }
 
