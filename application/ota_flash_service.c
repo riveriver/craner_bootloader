@@ -15,7 +15,7 @@
 #define OTA_FLASH_BANK_SIZE           0x00100000UL
 #define OTA_FLASH_PROGRAM_UNIT        32U
 #define OTA_FLASH_ERASE_VOLTAGE       FLASH_VOLTAGE_RANGE_3
-#define OTA_FLASH_CONFIRM_MAX_ATTEMPTS 3UL
+#define OTA_FLASH_CONFIRM_MAX_ATTEMPTS 10UL
 
 #define OTA_FLASH_LOG_I(format, ...) (void)shell_interface_printf("[I][OTA_FLASH] " format "\r\n", ##__VA_ARGS__)
 #define OTA_FLASH_LOG_E(format, ...) (void)shell_interface_printf("[E][OTA_FLASH] " format "\r\n", ##__VA_ARGS__)
