@@ -103,34 +103,5 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
-  if ((huart == NULL) || (huart->Instance == NULL))
-  {
-    LOG_E("invalid huart pointer");
-    return;
-  }
-
-  LOG_E("uart error: err=0x%08lx g=%lu rx=%lu isr=0x%08lx",
-             (unsigned long)huart->ErrorCode,
-             (unsigned long)huart->gState,
-             (unsigned long)huart->RxState,
-             (unsigned long)huart->Instance->ISR);
-
-  uart_service_status_t status = uart_service_on_error(huart);
-  if (status == UART_SERVICE_ERR_NOT_INIT)
-  {
-    return;
-  }
-
-  if ((status != UART_SERVICE_OK) && (status != UART_SERVICE_ERR_UART))
-  {
-    LOG_E("uart service error failed: %d", (int)status);
-    return;
-  }
-
-  status = uart_service_start_recv_it(huart);
-  if (status != UART_SERVICE_OK)
-  {
-    LOG_E("restart rx failed: %d", (int)status);
-    return;
-  }  
+  (void)huart;
 }
