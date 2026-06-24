@@ -3,9 +3,9 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+#include <uart_manage_port.h>
 
 #include "stm32h7xx_hal.h"
-#include "uart_service_port.h"
 
 #define OTA_FLASH_META_MAGIC          0x4F54414DUL
 #define OTA_FLASH_META_STRUCT_VERSION 2UL

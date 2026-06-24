@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "uart_service_port.h"
+#include <uart_manage_port.h>
 
 #define YMODEM_SOH_DATA_SIZE 128U
 #define YMODEM_STX_DATA_SIZE 1024U
@@ -540,7 +540,7 @@ ota_ymodem_status_t ota_ymodem_protocol_start_receive(void)
   g_ymodem.phase = YMODEM_PHASE_WAIT_FILE_INFO;
   g_ymodem.expected_seq = 0U;
 
-  YMODEM_LOG_I("start receive, send CRC request");
+  // YMODEM_LOG_I("start receive, send CRC request");
   return ymodem_send_control(OTA_YMODEM_CRC_REQUEST);
 }
 

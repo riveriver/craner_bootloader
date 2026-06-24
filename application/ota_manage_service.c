@@ -4,11 +4,12 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <uart_manage_port.h>
 
 #include "main.h"
 #include "ota_flash_service.h"
 #include "ota_ymodem_protocol.h"
-#include "uart_service_port.h"
+#include "lwrb.h"
 
 extern UART_HandleTypeDef huart1;
 extern UART_HandleTypeDef huart5;
@@ -16,8 +17,6 @@ extern UART_HandleTypeDef huart8;
 
 #define OTA_MANAGE_REQUEST_CRC_REQUEST_MS            5000UL
 #define OTA_MANAGE_REQUEST_WAIT_TRANSFER_TIMEOUT_MS  180000UL
-#define OTA_MANAGE_PROBE_CRC_REQUEST_MS              2000UL
-#define OTA_MANAGE_PROBE_WAIT_TRANSFER_TIMEOUT_MS    6000UL
 #define OTA_MANAGE_RESCUE_CRC_REQUEST_MS             5000UL
 #define OTA_MANAGE_RESCUE_WAIT_TRANSFER_TIMEOUT_MS   180000UL
 #define OTA_MANAGE_PACKET_TIMEOUT_MS                 1000UL
@@ -246,7 +245,7 @@ static uint8_t ota_manage_sp_in_ram(uint32_t sp)
 static int ota_manage_ymodem_send(const uint8_t *data, uint16_t len, void *user)
 {
   (void)user;
-  if (ota_ack_send(data, len) != UART_SERVICE_OK)
+  if (ota_ack_send(data, len) != 0)
   {
     OTA_LOG_E("YMODEM send failed, len=%u", (unsigned int)len);
     return -1;
@@ -534,9 +533,9 @@ ota_manage_status_t ota_manage_service_start(void)
   }
   else if (g_ota_manage.ota_requested == 0U)
   {
-    g_ota_manage.requested_slot = ota_flash_get_inactive_slot();
-    g_ota_manage.crc_request_interval_ms = OTA_MANAGE_PROBE_CRC_REQUEST_MS;
-    g_ota_manage.wait_transfer_timeout_ms = OTA_MANAGE_PROBE_WAIT_TRANSFER_TIMEOUT_MS;
+    OTA_LOG_I("no OTA request, jump active app directly");
+    g_ota_manage.state = OTA_MANAGE_STATE_JUMP_APP;
+    return OTA_MANAGE_OK;
   }
   else
   {
@@ -598,22 +597,33 @@ ota_manage_status_t ota_manage_service_start(void)
 
 void ota_manage_service_process(uint32_t now_ms)
 {
-  const uint8_t *data;
-  uint16_t len;
+  const lwrb_t *ring;
 
   if ((g_ota_manage.state == OTA_MANAGE_STATE_ERROR) && (g_ota_manage.rescue_mode != 0U))
   {
     ota_manage_restart_rescue_receive(now_ms);
   }
 
-  while ((data = uart_service_port_get_ota_read_ptr(&len)) != NULL)
+  ring = uart_service_port_get_ota_ring();
+  if (ring != NULL)
   {
-    for (uint16_t i = 0U; i < len; ++i)
+    for (;;)
     {
-      (void)ota_ymodem_protocol_input_byte(data[i]);
-    }
+      const uint8_t *data = (const uint8_t *)lwrb_get_linear_block_read_address(ring);
+      lwrb_sz_t len = lwrb_get_linear_block_read_length(ring);
 
-    uart_service_port_consume_ota_data(len);
+      if ((data == NULL) || (len == 0U))
+      {
+        break;
+      }
+
+      for (lwrb_sz_t i = 0U; i < len; ++i)
+      {
+        (void)ota_ymodem_protocol_input_byte(data[i]);
+      }
+
+      (void)lwrb_advance((lwrb_t *)ring, len);
+    }
   }
 
   if ((g_ota_manage.state == OTA_MANAGE_STATE_WAIT_TRANSFER) &&

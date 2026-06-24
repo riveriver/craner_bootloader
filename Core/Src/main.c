@@ -17,12 +17,12 @@
   */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
+#include <uart_manage_port.h>
 #include "main.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "ota_manage_service.h"
-#include "uart_service_port.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
