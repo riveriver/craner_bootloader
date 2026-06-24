@@ -16,10 +16,28 @@ extern "C" {
 
 #include "uart_manage_port.h"
 
-typedef uint32_t (*interface_send_fn_t)(const uint8_t *buf, uint16_t len);
-typedef uint32_t (*interface_recv_fn_t)(uint8_t *buf, uint16_t len);
+#ifndef UART_MANAGE_ENABLE_DMA_CACHE
+#define UART_MANAGE_ENABLE_DMA_CACHE 0U
+#endif
+
+typedef int32_t (*interface_send_fn_t)(const uint8_t *buf, uint16_t len);
+typedef int32_t (*interface_recv_fn_t)(uint8_t *buf, uint16_t len);
 
 #define UART_MANAGE_MAX_OBJECTS 8U
+
+typedef enum
+{
+    UART_MANAGE_OK = 0,
+    UART_MANAGE_ERR_POINTER_NULL = -1,
+    UART_MANAGE_ERR_INVALID_PARAM = -2,
+    UART_MANAGE_ERR_NOT_FOUND = -3,
+    UART_MANAGE_ERR_NO_SLOT = -4,
+    UART_MANAGE_ERR_RECV_START = -5,
+    UART_MANAGE_ERR_FIFO = -6,
+    UART_MANAGE_ERR_RING = -7,
+    UART_MANAGE_ERR_NO_SPACE = -8,
+    UART_MANAGE_ERR_SEND = -9
+} uart_manage_err_t;
 
 typedef struct uart_interface
 {
@@ -56,18 +74,17 @@ uart_inferface_t *uart_manage_get_obj(UART_HandleTypeDef *huart);
 uart_inferface_t *uart_manage_get_obj_by_name(const char *name);
 
 int uart_manage_register_interface(uart_inferface_t *m_obj);
-int uart_manage_init_table(const uart_inferface_t *table, uint16_t table_size);
 int uart_manage_set_recv_callback(UART_HandleTypeDef *huart, interface_recv_fn_t recv_callback);
 
-void uart_manage_enable_dma_recv(UART_HandleTypeDef *huart);
-void uart_manage_enable_dma_recv_by_name(const char *name);
+int uart_manage_enable_dma_recv(UART_HandleTypeDef *huart);
+int uart_manage_enable_dma_recv_by_name(const char *name);
 int uart_manage_dma_send(UART_HandleTypeDef *huart, const uint8_t *buf, uint16_t len);
 int uart_manage_dma_send_by_name(const char *name, const uint8_t *buf, uint16_t len);
 
-void uart_manage_send_completed_hook(UART_HandleTypeDef *huart);
-void uart_manage_reset_dma_send(UART_HandleTypeDef *huart);
+int uart_manage_send_completed_hook(UART_HandleTypeDef *huart);
+int uart_manage_reset_dma_send(UART_HandleTypeDef *huart);
 int uart_manage_write_to_recv_ring(uart_inferface_t *m_obj, uint8_t *buf, uint16_t len);
-void uart_manage_recv_idle_hook(uart_inferface_t *m_obj, interrput_type int_type, uint16_t size);
+int uart_manage_recv_idle_hook(uart_inferface_t *m_obj, interrput_type int_type, uint16_t size);
 
 #ifdef __cplusplus
 }

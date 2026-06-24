@@ -245,7 +245,7 @@ static uint8_t ota_manage_sp_in_ram(uint32_t sp)
 static int ota_manage_ymodem_send(const uint8_t *data, uint16_t len, void *user)
 {
   (void)user;
-  if (ota_ack_send(data, len) != 0)
+  if (mqtt_ota_progress_printf(data, len) != 0)
   {
     OTA_LOG_E("YMODEM send failed, len=%u", (unsigned int)len);
     return -1;
@@ -290,13 +290,40 @@ static void ota_manage_restart_rescue_receive(uint32_t now_ms)
 static void ota_manage_send_cancel(void)
 {
   static const uint8_t cancel[2] = {OTA_YMODEM_CAN, OTA_YMODEM_CAN};
-  (void)ota_ack_send(cancel, (uint16_t)sizeof(cancel));
+  (void)mqtt_ota_progress_printf(cancel, (uint16_t)sizeof(cancel));
 }
 
 static void ota_manage_send_crc_request(void)
 {
   uint8_t crc_request = OTA_YMODEM_CRC_REQUEST;
-  (void)ota_ack_send(&crc_request, 1U);
+  (void)mqtt_ota_progress_printf(&crc_request, 1U);
+}
+
+static void ota_manage_dump_rx_data(const uint8_t *data, lwrb_sz_t len)
+{
+  char line[96];
+  int pos = 0;
+  lwrb_sz_t head_len;
+
+  if ((data == NULL) || (len == 0U))
+  {
+    return;
+  }
+
+  head_len = len;
+  if (head_len > 8U)
+  {
+    head_len = 8U;
+  }
+
+  pos += snprintf(&line[pos], sizeof(line) - (uint32_t)pos, "[OTA_RX] len=%lu head:",
+                  (unsigned long)len);
+  for (lwrb_sz_t i = 0U; i < head_len; ++i)
+  {
+    pos += snprintf(&line[pos], sizeof(line) - (uint32_t)pos, " %02X", (unsigned int)data[i]);
+  }
+  (void)snprintf(&line[pos], sizeof(line) - (uint32_t)pos, "\r\n");
+  (void)shell_interface_send((const uint8_t *)line, (uint16_t)strlen(line));
 }
 
 static int ota_manage_on_file_begin(const ota_ymodem_file_info_t *file, void *user)
@@ -617,12 +644,14 @@ void ota_manage_service_process(uint32_t now_ms)
         break;
       }
 
+      ota_manage_dump_rx_data(data, len);
+
       for (lwrb_sz_t i = 0U; i < len; ++i)
       {
         (void)ota_ymodem_protocol_input_byte(data[i]);
       }
 
-      (void)lwrb_advance((lwrb_t *)ring, len);
+      (void)lwrb_skip((lwrb_t *)ring, len);
     }
   }
 
@@ -691,7 +720,6 @@ void ota_manage_service_process(uint32_t now_ms)
   if (g_ota_manage.state == OTA_MANAGE_STATE_COMPLETE)
   {
     g_ota_manage.state = OTA_MANAGE_STATE_JUMP_APP;
-    OTA_LOG_I("OTA complete, jump to updated app");
   }
 
   if (g_ota_manage.state == OTA_MANAGE_STATE_JUMP_APP)
@@ -761,6 +789,12 @@ void ota_manage_service_jump_to_active_app(void)
   app_reset = *((const uint32_t *)(app_addr + 4U));
   app_entry = (ota_app_entry_t)app_reset;
 
+  OTA_LOG_I("jump app: slot=%s vector_base=0x%08lx reset=0x%08lx sp=0x%08lx",
+            ota_manage_slot_name(active_slot),
+            (unsigned long)app_addr,
+            (unsigned long)app_reset,
+            (unsigned long)app_stack);
+
   HAL_Delay(20U);
   ota_manage_disable_all_irqs();
 
@@ -774,6 +808,9 @@ void ota_manage_service_jump_to_active_app(void)
   __DSB();
   __ISB();
   __set_MSP(app_stack);
+  __DSB();
+  __ISB();
+  __enable_irq();
 
   app_entry();
 

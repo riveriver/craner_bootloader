@@ -5,6 +5,7 @@
 #include "main.h"
 
 #define LOG_E(format, ...) (void)shell_interface_printf("[E] " format "\r\n", ##__VA_ARGS__)
+#define LOG_I(format, ...) (void)shell_interface_printf("[I] " format "\r\n", ##__VA_ARGS__)
 
 extern UART_HandleTypeDef huart5;
 extern UART_HandleTypeDef huart1;
@@ -19,15 +20,15 @@ extern UART_HandleTypeDef huart1;
 extern DMA_HandleTypeDef hdma_uart5_rx;
 extern DMA_HandleTypeDef hdma_usart1_rx;
 
-static uint8_t uart5_recv_buff[256U] DMA_BUFFER;
-static uint8_t uart5_send_buff[256U] DMA_BUFFER;
-static uint8_t uart5_send_fifo_buff[256U] DMA_BUFFER;
-static uint8_t uart5_process_buff[1024U] DMA_BUFFER;
+static uint8_t uart5_recv_buff[512U] DMA_BUFFER;
+static uint8_t uart5_send_buff[512U] DMA_BUFFER;
+static uint8_t uart5_send_fifo_buff[512U] DMA_BUFFER;
+static uint8_t uart5_process_buff[512U * 2] DMA_BUFFER;
 
-static uint8_t uart1_recv_buff[256U] DMA_BUFFER;
-static uint8_t uart1_send_buff[256U] DMA_BUFFER;
-static uint8_t uart1_send_fifo_buff[256U] DMA_BUFFER;
-static uint8_t uart1_process_buff[1024U] DMA_BUFFER;
+static uint8_t uart1_send_buff[512U] DMA_BUFFER;
+static uint8_t uart1_send_fifo_buff[512U] DMA_BUFFER;
+static uint8_t uart1_recv_buff[2048U] DMA_BUFFER;
+static uint8_t uart1_process_buff[2048U * 2] DMA_BUFFER;
 
 const uart_inferface_t uart_manage_table[] = {
   {
@@ -62,7 +63,7 @@ const uart_inferface_t uart_manage_table[] = {
   },
 };
 
-int uart_service_init_port(void)
+void uart_service_init_port(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
 
@@ -92,27 +93,48 @@ int uart_service_init_port(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  uart_service_port_init_ring_buffer();
-
   const uint16_t count = (uint16_t)(sizeof(uart_manage_table) / sizeof(uart_manage_table[0]));
-  if (count == 0U)
+  int interface_init_result[UART_MANAGE_MAX_OBJECTS] = {0};
+
+  if ((count == 0U) || (count > UART_MANAGE_MAX_OBJECTS))
   {
-    LOG_E("uart manage table is empty");
-    return -1;
+    return;
   }
 
-  if (uart_manage_init_table(uart_manage_table, count) != 0)
+  for (uint16_t i = 0U; i < count; ++i)
   {
-    LOG_E("uart_manage_init_table failed");
-    return -1;
+    int ret = uart_manage_register_interface((uart_inferface_t *)&uart_manage_table[i]);
+    if (ret == UART_MANAGE_OK)
+    {
+      ret = uart_manage_enable_dma_recv(uart_manage_table[i].uart_h);
+    }
+    interface_init_result[i] = ret;
   }
 
-  /* enable DMA receive for registered ports */
-  uart_manage_enable_dma_recv_by_name("shell");
-  uart_manage_enable_dma_recv_by_name("mqtt");
-
-  return 0;
+  for (uint16_t i = 0U; i < count; ++i)
+  {
+    if (interface_init_result[i] == UART_MANAGE_OK)
+    {
+      LOG_I("uart manage init %s ok", uart_manage_table[i].name);
+    }
+    else
+    {
+      LOG_E("uart manage init %s failed: %d", uart_manage_table[i].name, interface_init_result[i]);
+    }
+  }
 }
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+  (void)uart_manage_reset_dma_send(huart);
+  (void)uart_manage_enable_dma_recv(huart);
+}
+
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+{
+  uart_manage_send_completed_hook(huart);
+}
+
 
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t size)
 {
@@ -126,14 +148,4 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t size)
     }
     (void)uart_manage_enable_dma_recv(huart);
   }
-}
-
-void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
-{
-  uart_manage_send_completed_hook(huart);
-}
-
-void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
-{
-  (void)huart;
 }
