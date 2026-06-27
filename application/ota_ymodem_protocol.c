@@ -101,6 +101,91 @@ static const char *ymodem_rx_state_name(ota_ymodem_rx_state_t state)
   }
 }
 
+static const char *ymodem_phase_name(ymodem_phase_t phase)
+{
+  switch (phase)
+  {
+    case YMODEM_PHASE_WAIT_FILE_INFO:
+      return "WAIT_FILE_INFO";
+    case YMODEM_PHASE_WAIT_FILE_DATA:
+      return "WAIT_FILE_DATA";
+    case YMODEM_PHASE_WAIT_FINISH_PACKET:
+      return "WAIT_FINISH_PACKET";
+    case YMODEM_PHASE_DONE:
+      return "DONE";
+    case YMODEM_PHASE_ABORTED:
+      return "ABORTED";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+static const char *ymodem_control_name(uint8_t control)
+{
+  switch (control)
+  {
+    case OTA_YMODEM_SOH:
+      return "SOH";
+    case OTA_YMODEM_STX:
+      return "STX";
+    case OTA_YMODEM_EOT:
+      return "EOT";
+    case OTA_YMODEM_ACK:
+      return "ACK";
+    case OTA_YMODEM_NAK:
+      return "NAK";
+    case OTA_YMODEM_CAN:
+      return "CAN";
+    case OTA_YMODEM_CRC_REQUEST:
+      return "C";
+    default:
+      return "DATA";
+  }
+}
+
+static void ymodem_log_tx_bytes(const uint8_t *data, uint16_t len)
+{
+  if ((data == NULL) || (len == 0U))
+  {
+    return;
+  }
+
+  if (len == 1U)
+  {
+    YMODEM_LOG_I("TX %s(0x%02x): state=%s phase=%s seq=%u expect=%u received=%lu",
+                 ymodem_control_name(data[0]),
+                 (unsigned int)data[0],
+                 ymodem_rx_state_name(g_ymodem.rx_state),
+                 ymodem_phase_name(g_ymodem.phase),
+                 (unsigned int)g_ymodem.packet_seq,
+                 (unsigned int)g_ymodem.expected_seq,
+                 (unsigned long)g_ymodem.file.bytes_received);
+    return;
+  }
+
+  if (len == 2U)
+  {
+    YMODEM_LOG_I("TX %s(0x%02x)+%s(0x%02x): state=%s phase=%s seq=%u expect=%u received=%lu",
+                 ymodem_control_name(data[0]),
+                 (unsigned int)data[0],
+                 ymodem_control_name(data[1]),
+                 (unsigned int)data[1],
+                 ymodem_rx_state_name(g_ymodem.rx_state),
+                 ymodem_phase_name(g_ymodem.phase),
+                 (unsigned int)g_ymodem.packet_seq,
+                 (unsigned int)g_ymodem.expected_seq,
+                 (unsigned long)g_ymodem.file.bytes_received);
+    return;
+  }
+
+  YMODEM_LOG_I("TX bytes len=%u first=%s(0x%02x): state=%s phase=%s",
+               (unsigned int)len,
+               ymodem_control_name(data[0]),
+               (unsigned int)data[0],
+               ymodem_rx_state_name(g_ymodem.rx_state),
+               ymodem_phase_name(g_ymodem.phase));
+}
+
 static uint8_t ymodem_max_errors(void)
 {
   return (g_ymodem.config.max_errors == 0U) ? YMODEM_DEFAULT_MAX_ERRORS
@@ -145,6 +230,7 @@ static ota_ymodem_status_t ymodem_send_bytes(const uint8_t *data, uint16_t len)
     return OTA_YMODEM_STATUS_ERR_SEND;
   }
 
+  ymodem_log_tx_bytes(data, len);
   return OTA_YMODEM_STATUS_OK;
 }
 
@@ -261,7 +347,7 @@ static ota_ymodem_status_t ymodem_accept_file_info_packet(void)
   {
     g_ymodem.phase = YMODEM_PHASE_DONE;
     g_ymodem.rx_state = OTA_YMODEM_RX_DONE;
-    YMODEM_LOG_I("empty file info packet, transfer done");
+    YMODEM_LOG_I("RX finish empty file info packet, transfer done");
     return ymodem_send_control(OTA_YMODEM_ACK);
   }
 
@@ -347,7 +433,8 @@ static ota_ymodem_status_t ymodem_accept_data_packet(void)
 
   if (g_ymodem.packet_seq == previous_seq)
   {
-    YMODEM_LOG_I("duplicate packet ACK: seq=%u", (unsigned int)g_ymodem.packet_seq);
+    YMODEM_LOG_I("RX duplicate DATA seq=%u, re-send ACK",
+                 (unsigned int)g_ymodem.packet_seq);
     g_ymodem.rx_state = OTA_YMODEM_RX_FIND_HEADER;
     g_ymodem.data_index = 0U;
 
@@ -402,6 +489,14 @@ static ota_ymodem_status_t ymodem_accept_data_packet(void)
     }
   }
 
+  YMODEM_LOG_I("RX accept DATA seq=%u offset=%lu len=%u total=%lu/%lu next_seq=%u",
+               (unsigned int)g_ymodem.packet_seq,
+               (unsigned long)g_ymodem.file.bytes_received,
+               (unsigned int)payload_len,
+               (unsigned long)(g_ymodem.file.bytes_received + payload_len),
+               (unsigned long)g_ymodem.file.size,
+               (unsigned int)(uint8_t)(g_ymodem.expected_seq + 1U));
+
   g_ymodem.file.bytes_received += payload_len;
   g_ymodem.expected_seq = (uint8_t)(g_ymodem.expected_seq + 1U);
   g_ymodem.rx_state = OTA_YMODEM_RX_FIND_HEADER;
@@ -426,6 +521,7 @@ static ota_ymodem_status_t ymodem_accept_finish_packet(void)
 
   g_ymodem.phase = YMODEM_PHASE_DONE;
   g_ymodem.rx_state = OTA_YMODEM_RX_DONE;
+  YMODEM_LOG_I("RX accept FINISH seq=%u", (unsigned int)g_ymodem.packet_seq);
 
   if (ymodem_send_control(OTA_YMODEM_ACK) != OTA_YMODEM_STATUS_OK)
   {
@@ -445,6 +541,14 @@ static ota_ymodem_status_t ymodem_accept_finish_packet(void)
 static ota_ymodem_status_t ymodem_finish_packet(ota_ymodem_status_t (*accept_packet)(void))
 {
   uint16_t calc_crc = get_ymodem_crc16(g_ymodem.data, g_ymodem.packet_size);
+
+  YMODEM_LOG_I("RX packet complete: header=%s seq=%u size=%u crc=0x%04x calc=0x%04x phase=%s",
+               ymodem_control_name(g_ymodem.packet_header),
+               (unsigned int)g_ymodem.packet_seq,
+               (unsigned int)g_ymodem.packet_size,
+               (unsigned int)g_ymodem.received_crc,
+               (unsigned int)calc_crc,
+               ymodem_phase_name(g_ymodem.phase));
 
   if (calc_crc != g_ymodem.received_crc)
   {
@@ -500,7 +604,7 @@ static ota_ymodem_status_t ymodem_handle_eot(void)
   if (g_ymodem.eot_count == 0U)
   {
     g_ymodem.eot_count = 1U;
-    YMODEM_LOG_I("first EOT received, send NAK");
+    YMODEM_LOG_I("RX first EOT, send NAK to confirm end");
     return ymodem_send_control(OTA_YMODEM_NAK);
   }
 
@@ -508,7 +612,7 @@ static ota_ymodem_status_t ymodem_handle_eot(void)
   g_ymodem.phase = YMODEM_PHASE_WAIT_FINISH_PACKET;
   g_ymodem.rx_state = OTA_YMODEM_RX_FIND_HEADER;
 
-  YMODEM_LOG_I("second EOT received, wait finish packet");
+  YMODEM_LOG_I("RX second EOT, send ACK+C and wait finish packet");
   return ymodem_send_bytes(ack_and_crc_request, (uint16_t)sizeof(ack_and_crc_request));
 }
 
@@ -584,6 +688,12 @@ ota_ymodem_status_t ota_ymodem_protocol_input_byte(uint8_t byte)
         g_ymodem.data_index = 0U;
         g_ymodem.received_crc = 0U;
         g_ymodem.rx_state = OTA_YMODEM_RX_READ_PACKET_SEQ;
+        YMODEM_LOG_I("RX header %s(0x%02x): packet_size=%u phase=%s expect=%u",
+                     ymodem_control_name(byte),
+                     (unsigned int)byte,
+                     (unsigned int)g_ymodem.packet_size,
+                     ymodem_phase_name(g_ymodem.phase),
+                     (unsigned int)g_ymodem.expected_seq);
       }
       else if (byte == OTA_YMODEM_EOT)
       {
